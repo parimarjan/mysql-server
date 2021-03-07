@@ -5016,13 +5016,14 @@ bool JOIN::make_join_plan() {
   select_lex->sj_pullout_done = true;
   const uint sj_nests = select_lex->sj_nests.size();  // Changed by pull-out
 
-  if (!(select_lex->active_options() & OPTION_NO_CONST_TABLES)) {
-    // Detect tables that are const (0 or 1 row) and read their contents.
-    if (extract_const_tables()) return true;
+  /// pari: switch off const tables using flags
+  //if (!(select_lex->active_options() & OPTION_NO_CONST_TABLES)) {
+    //// Detect tables that are const (0 or 1 row) and read their contents.
+    //if (extract_const_tables()) return true;
 
-    // Detect tables that are functionally dependent on const values.
-    if (extract_func_dependent_tables()) return true;
-  }
+    //// Detect tables that are functionally dependent on const values.
+    //if (extract_func_dependent_tables()) return true;
+  //}
   // Possibly able to create more sargable predicates from const rows.
   if (const_tables && sargables) update_sargable_from_const(sargables);
 
@@ -5553,13 +5554,16 @@ void JOIN::update_sargable_from_const(SARGABLE_PARAM *sargables) {
   @returns false if success, true if error
 */
 
+// pari: for single table stuff
 bool JOIN::estimate_rowcount() {
   Opt_trace_context *const trace = &thd->opt_trace;
   Opt_trace_object trace_wrapper(trace);
   Opt_trace_array trace_records(trace, "rows_estimation");
 
   JOIN_TAB *const tab_end = join_tab + tables;
+  int ti = 0;
   for (JOIN_TAB *tab = join_tab; tab < tab_end; tab++) {
+    ti += 1;
     const Cost_model_table *const cost_model = tab->table()->cost_model();
     Opt_trace_object trace_table(trace);
     trace_table.add_utf8_table(tab->table_ref);
@@ -5571,6 +5575,7 @@ bool JOIN::estimate_rowcount() {
           .add("empty", tab->table()->has_null_row());
 
       // Only one matching row and one block to read
+      // pari: what is happening in the passed in arg??
       tab->set_records(tab->found_records = 1);
       tab->worst_seeks = cost_model->page_read_cost(1.0);
       tab->read_time = tab->worst_seeks;

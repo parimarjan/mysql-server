@@ -77,6 +77,27 @@
 #include "sql/window.h"
 #include "sql_string.h"
 
+// pari: put these somewhere else.
+#include "sql/jsmn.h"
+//#include "sql/uthash.h"
+#include <map>
+//#include <iostream>
+#include <fstream>
+#include <math.h>
+
+#define CROSS_JOIN_CONSTANT 150001000000.0
+
+//void debug_print4(char *msg)
+//{
+  //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
+  //if (fp != NULL)
+  //{
+    //fputs(msg, fp);
+    ////fflush(fp);
+    //fclose(fp);
+  //}
+//}
+
 using std::max;
 using std::min;
 
@@ -112,6 +133,106 @@ static uint cache_record_length(JOIN *join, uint idx) {
   return length;
 }
 
+char * read_file(FILE *fp)
+{
+  char *buffer;
+  size_t size;
+
+  buffer = NULL;
+  size = 0;
+
+  /* Open your_file in read-only mode */
+
+  /* Get the buffer size */
+  fseek(fp, 0, SEEK_END); /* Go to end of file */
+  size = ftell(fp); /* How many bytes did we pass ? */
+
+  /* Set position of stream to the beginning */
+  rewind(fp);
+
+  /* Allocate the buffer (no need to initialize it with calloc) */
+  buffer = (char *) malloc((size + 1) * sizeof(*buffer)); /* size + 1 byte for the \0 */
+
+  /* Read the file into the buffer */
+  fread(buffer, size, 1, fp); /* Read 1 chunk of size bytes from fp into buffer */
+
+  /* NULL-terminate the buffer */
+  buffer[size] = '\0';
+  fclose(fp);
+  return buffer;
+}
+
+//struct cardinality {
+  //char *table_names;
+  //double cardinality;
+  //UT_hash_handle hh;         [> makes this structure hashable <]
+//};
+
+//void add_cardinality(char *table_names, double card,
+			//struct cardinality *injected_cards)
+//{
+  //struct cardinality *c;
+  //char *key;
+  //c = (struct cardinality *) malloc(sizeof(struct cardinality));
+  //char test[100];
+  //sprintf(test, "key to add to hash-map: %s\n", table_names);
+  //debug_print4(test);
+
+
+  //key = (char *) malloc(strlen(table_names)+1);
+  //strcpy(key, table_names);
+  //c->cardinality = card;
+  //c->table_names = key;
+  //debug_print4("before HASH_ADD_KEYPTR\n");
+  //HASH_ADD_KEYPTR(hh, injected_cards, c->table_names,
+      //strlen(c->table_names), c);
+//}
+
+/* @cardinalities: json string.
+ */
+void update_cardinalities(const char *cardinalities,
+  std::map<std::string, double> &m)
+	//struct cardinality *injected_cards)
+{
+  jsmn_parser p;
+  double card;
+  int i,r;
+  // FIXME: use smaller sized buffers?
+  jsmntok_t t[15000];
+  char test_str[100], table_str[10000];
+  char double_str[128];
+
+  jsmn_init(&p);
+  r = jsmn_parse(&p, cardinalities, strlen(cardinalities), t,
+                  15000);
+  sprintf(test_str, "r: %d\n", r);
+  //debug_print4(test_str);
+
+  if (r < 0) {
+    sprintf(test_str, "Failed to parse JSON: %d\n", r);
+    //debug_print4(test_str);
+    return;
+  }
+
+  //debug_print4("going to start printing key-value pairs\n");
+  for (i = 0; i < r; i+=1) {
+    // skip the metadata stuff
+    if (t[i].type != JSMN_STRING) {
+      continue;
+    }
+    sprintf(table_str, "%.*s", t[i].end - t[i].start,
+           cardinalities + t[i].start);
+    sprintf(double_str, "%.*s\n", t[i + 1].end - t[i + 1].start,
+           cardinalities + t[i + 1].start);
+		//debug_print4("key: ");
+		//debug_print4(table_str);
+		//debug_print4("value: ");
+		//debug_print4(double_str);
+    card = atof(double_str);
+    m[table_str] = card;
+  }
+}
+
 Optimize_table_order::Optimize_table_order(THD *thd_arg, JOIN *join_arg,
                                            TABLE_LIST *sjm_nest_arg)
     : thd(thd_arg),
@@ -128,7 +249,28 @@ Optimize_table_order::Optimize_table_order(THD *thd_arg, JOIN *join_arg,
       has_sj(!(join->select_lex->sj_nests.empty() || emb_sjm_nest)),
       test_all_ref_keys(false),
       found_plan_with_allowed_sj(false),
-      got_final_plan(false) {}
+      got_final_plan(false)
+      {
+        // pari: initialize cardinalities json object here
+				const char *fn = "/tmp/query_cardinalities.json";
+        FILE *fp = fopen(fn, "r");
+        use_injected_cards = true;
+        if (fp) {
+          char *file_str = read_file(fp);
+          //debug_print4(file_str);
+          if (file_str)
+          {
+            // let us loop over the json, and add everything to the hashmap
+            update_cardinalities(file_str, injected_cards);
+            //debug_print4("initialized injected cards\n");
+          } else {
+            use_injected_cards = false;
+          }
+        } else {
+          //debug_print4("no cardinalities file: setting use injected cards to false\n");
+          use_injected_cards = false;
+        }
+      }
 
 /**
   Find the best index to do 'ref' access on for a table.
@@ -750,6 +892,8 @@ Key_use *Optimize_table_order::find_best_ref(
                               rows that are estimated to be filtered out
                               by query conditions.
 */
+
+// pari: TODO: figure out how to handle scan cost filter / heuristics here.
 double Optimize_table_order::calculate_scan_cost(
     const JOIN_TAB *tab, const uint idx, const Key_use *best_ref,
     const double prefix_rowcount, const bool found_condition,
@@ -961,6 +1105,7 @@ double Optimize_table_order::lateral_derived_cost(
   @param[out] pos          Table access plan
 */
 
+// pari: calls scan_cost function from here; figure this out better.
 void Optimize_table_order::best_access_path(JOIN_TAB *tab,
                                             const table_map remaining_tables,
                                             const uint idx, bool disable_jbuf,
@@ -1920,12 +2065,23 @@ class Join_tab_compare_embedded_first {
 
 bool Optimize_table_order::choose_table_order() {
   DBUG_TRACE;
+  //debug_print4("choose_table_order\n");
 
   got_final_plan = false;
 
   // Make consistent prefix cost estimates also for the const tables:
   for (uint i = 0; i < join->const_tables; i++)
     (join->positions + i)->set_prefix_cost(0.0, 1.0);
+
+  // fails coz of bad things
+  //debug_print4("     POSITIONS test: ");
+  //POSITION pos;
+  //TABLE *table;
+  //for (int i = 0; i < join->tables; i++) {
+    //pos = join->positions[i];
+    //table = pos.table->table();
+    //debug_print4((char *) table->alias);
+  //}
 
   /* Are there any tables to optimize? */
   if (join->const_tables == join->tables) {
@@ -2306,6 +2462,12 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
   /* Number of tables remaining to be optimized */
   uint size_remain = n_tables;
 
+  //char test[50];
+  //sprintf(test, "const tables at start: %d\n", join->const_tables);
+  //debug_print4(test);
+  //sprintf(test, "size remain at start: %d\n", size_remain);
+  //debug_print4(test);
+
   do {
     /* Find the extension of the current QEP with the lowest cost */
     join->best_read = DBL_MAX;
@@ -2559,6 +2721,35 @@ bool Optimize_table_order::consider_plan(uint idx,
   return false;
 }
 
+char * join_strs(int num, const char **words)
+{
+	char *message = NULL;
+	// add first word, then space
+	int message_len;
+	message_len = strlen(words[0]) + 1;
+  message = (char *) malloc(message_len);
+  strcpy(message, words[0]);
+
+  for(int i = 1; i < num; ++i)
+  {
+    message_len += 1 + strlen(words[i]);
+    message = (char*) realloc(message, message_len);
+    /*strncat(strncat(message, " ", message_len), words[i], message_len);*/
+    strcat(message, " ");
+    strcat(message, words[i]);
+  }
+
+	return message;
+}
+
+//bool str_compare (std::string a, std::string b) {return a<b;}
+static int str_compare(const void* a, const void* b)
+{
+    //return strcmp(*(const char**)a, *(const char**)b);
+    return strcmp((const char*)a, (const char*)b);
+}
+
+
 /**
   Find a good, possibly optimal, query execution plan (QEP) by a possibly
   exhaustive search.
@@ -2688,7 +2879,7 @@ bool Optimize_table_order::consider_plan(uint idx,
 bool Optimize_table_order::best_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
-
+  //debug_print4("best_extension_by_limited_search\n");
   DBUG_EXECUTE_IF("bug13820776_2", thd->killed = THD::KILL_QUERY;);
   if (thd->killed)  // Abort
     return true;
@@ -2710,6 +2901,12 @@ bool Optimize_table_order::best_extension_by_limited_search(
                           idx ? join->positions[idx - 1].prefix_cost : 0.0,
                           "part_plan"););
 
+  //FILE *DBUG_FILE2 = fopen("/Users/pari/debug.txt", "ab");
+  //fputs("*******best_extension_by_limited_search********: ", DBUG_FILE2);
+
+  std::fstream debug_file;
+  debug_file.open("/Users/pari/debug.txt", std::fstream::app);
+
   /*
     'eq_ref_extended' are the 'remaining_tables' which has already been
     involved in an partial query plan extension if this QEP. These
@@ -2725,7 +2922,13 @@ bool Optimize_table_order::best_extension_by_limited_search(
 
   Deps_of_remaining_lateral_derived_tables deps_lateral(join, ~excluded_tables);
 
+  //char test[50];
+
+  // pari: what is !use_best_so_far??
   for (JOIN_TAB **pos = join->best_ref + idx; *pos && !use_best_so_far; pos++) {
+    //sprintf(test, "join order loop\n");
+    //debug_print4(test);
+
     JOIN_TAB *const s = *pos;
     const table_map real_table_bit = s->table_ref->map();
 
@@ -2753,11 +2956,103 @@ bool Optimize_table_order::best_extension_by_limited_search(
       deps_lateral.restore();  // as we "popped" the previously-tried table
 
       /* Find the best access method from 's' to the current partial plan */
-      best_access_path(s, remaining_tables, idx, false,
-                       idx ? (position - 1)->prefix_rowcount : 1.0, position);
 
-      // Compute the cost of extending the plan with 's'
-      position->set_prefix_join_cost(idx, cost_model);
+      // pari: update prefix_rowcount HERE; and then it should influence both
+      // the access_paths and the set_prefix_join_cost functions
+
+      if (use_injected_cards) {
+        // using plain C
+        //double prefix_card, cur_card, cur_table_card;
+        double prefix_card, cur_card;
+				//int MAX_TABLE_NAME_SIZE = 8;
+				const char *tables[20];
+				int num_tables = 0;
+				char *joined;
+				//debug_file << "hello from new get_injected_cards!" << std::endl;
+        POSITION *dpos;
+        TABLE *dtable;
+        for (uint ai = 0; ai < idx; ai++) {
+          //debug_file << "idx: " << ai << std::endl;
+          dpos = join->positions + ai;
+          dtable = dpos->table->table();
+          if (dtable) {
+            // TODO: or create new buffer to store this string?
+            //tables[num_tables] = (char *) dtable->alias;
+            tables[num_tables] = dtable->alias;
+            num_tables += 1;
+          }
+        }
+
+        //debug_file << "num tables after: " << num_tables << std::endl;
+
+        // TODO: for current table
+        dtable = s->table();
+        if (dtable) {
+          //tables[num_tables] = (char *) dtable->alias;
+          tables[num_tables] = dtable->alias;
+          std::string alias_name(dtable->alias);
+          //debug_file << "current alias: " << alias_name << std::endl;
+          //if (injected_cards.find(alias_name) != injected_cards.end()) {
+              ////debug_file << "found key: " << alias_name << std::endl;
+              //cur_table_card = injected_cards[alias_name];
+          //} else {
+              ////debug_file << "!!!!!!!ERRRROR!!!!!!!, could not find: " << alias_name << std::endl;
+              //cur_card = CROSS_JOIN_CONSTANT;
+          //}
+        }
+
+				qsort(tables, num_tables, sizeof(const char*), str_compare);
+				joined = join_strs(num_tables, tables);
+
+        std::string cur_key(joined);
+        //debug_file << "cur key is: " << cur_key << std::endl;
+
+        //cur_card = CROSS_JOIN_CONSTANT;
+        if (injected_cards.find(cur_key) != injected_cards.end()) {
+            //debug_file << "found cur_key: " << cur_key << std::endl;
+            cur_card = injected_cards[cur_key];
+            position->has_cross_join = false;
+        } else {
+            //debug_file << "did not find cur_key: " << cur_key << std::endl;
+            cur_card = CROSS_JOIN_CONSTANT;
+            position->has_cross_join = true;
+        }
+        prefix_card = (position - 1)->prefix_rowcount;
+
+        //if (injected_cards.find(prefix_key) != injected_cards.end()) {
+            //debug_file << "found prefix key: " << prefix_key << std::endl;
+            //prefix_card = injected_cards[prefix_key];
+        //} else {
+            //debug_file << "did not find prefix key: " << prefix_key << std::endl;
+            //prefix_card = CROSS_JOIN_CONSTANT;
+        //}
+
+        // pari: add flag / way to handle when no card provided
+        // TODO: should we be passing in prefix_card here?
+
+        //best_access_path(s, remaining_tables, idx, false,
+                         //idx ? prefix_card : 1.0, position);
+        //position->set_prefix_join_cost_injected(idx, cost_model, prefix_card,
+            //cur_table_card);
+
+        best_access_path(s, remaining_tables, idx, false,
+                         idx ? prefix_card : 1.0, position);
+        position->set_prefix_join_cost_injected(idx, cost_model, prefix_card);
+        position->prefix_rowcount = cur_card;
+
+      } else {
+        //debug_print4("No injected cards: usual C.E for QO\n");
+        // usual case
+        best_access_path(s, remaining_tables, idx, false,
+                         idx ? (position - 1)->prefix_rowcount : 1.0, position);
+        // Compute the cost of extending the plan with 's'
+        position->set_prefix_join_cost(idx, cost_model);
+      }
+
+      // pari: TODO: remove.
+      //sprintf(test, "after set_prefix_join_cost, count: %f\n",
+          //position->prefix_rowcount);
+      //debug_print4(test);
 
       trace_one_table
           .add("condition_filtering_pct", position->filter_effect * 100)
@@ -2777,6 +3072,14 @@ bool Optimize_table_order::best_extension_by_limited_search(
       } else
         position->no_semijoin();
 
+      // pari: if we found a cross-join so far, then do not expand this plan
+      // further.
+      if (position->has_cross_join) {
+        //debug_print4("has cross join, going to call backout_nj_state\n");
+        backout_nj_state(remaining_tables, s);
+        continue;
+      }
+
       /*
         Expand only partial plans with lower cost than the best QEP so far.
         However, if the best plan so far uses a disabled semi-join strategy,
@@ -2794,6 +3097,7 @@ bool Optimize_table_order::best_extension_by_limited_search(
         continue;
       }
 
+      // pari: may want to remove this.
       /*
         Prune some less promising partial plans. This heuristic may miss
         the optimal QEPs, thus it results in a non-exhaustive search.
@@ -2805,7 +3109,7 @@ bool Optimize_table_order::best_extension_by_limited_search(
              s->table() == join->sort_by_table)) {
           if (best_rowcount >= position->prefix_rowcount &&
               best_cost >= position->prefix_cost &&
-              /* TODO: What is the reasoning behind this condition? */
+              //TODO: What is the reasoning behind this condition?
               (!(s->key_dependent & remaining_tables) ||
                position->rows_fetched < 2.0)) {
             best_rowcount = position->prefix_rowcount;
@@ -2897,6 +3201,7 @@ done:
   // Restore previous #rows sorted best_ref[]
   memcpy(join->best_ref + idx, saved_refs,
          sizeof(JOIN_TAB *) * (join->tables - idx));
+  debug_file.close();
   return false;
 }
 
@@ -3037,6 +3342,7 @@ table_map Optimize_table_order::eq_ref_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
 
+  //debug_print4("EQ REF EXTENSION!!!SHOULD NOT HAVE HAPPENED\n");
   if (remaining_tables == 0) return 0;
 
   /*

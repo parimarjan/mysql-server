@@ -32,6 +32,7 @@
 
 #include "my_inttypes.h"
 #include "my_table_map.h"
+#include <map>
 
 class Cost_model_server;
 class JOIN;
@@ -78,6 +79,10 @@ class Optimize_table_order {
   const uint search_depth;  // Maximum search depth to apply in greedy search
   const uint prune_level;   // pruning heuristics to be applied
                             // (0 = EXHAUSTIVE, 1 = PRUNE_BY_TIME_OR_ROWS)
+  // pari: new variables
+  std::map<std::string, double> injected_cards;
+  bool use_injected_cards;
+
   /**
     Bitmap of all join nests embedding the last table appended to the current
     partial join.

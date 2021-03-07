@@ -66,6 +66,17 @@ struct TABLE_LIST;
 
 typedef ulonglong nested_join_map;
 
+//void debug_print5(char *msg)
+//{
+  //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
+  //if (fp != NULL)
+  //{
+    //fputs(msg, fp);
+    //fflush(fp);
+    //fclose(fp);
+  //}
+//}
+
 class Sql_cmd_select : public Sql_cmd_dml {
  public:
   explicit Sql_cmd_select(Query_result *result_arg) : Sql_cmd_dml() {
@@ -342,6 +353,10 @@ enum quick_type { QS_NONE, QS_RANGE, QS_DYNAMIC_RANGE };
 */
 
 struct POSITION {
+
+  /* to avoid further exploring plans with cross-joins */
+  bool has_cross_join = false;
+
   /**
     The number of rows that will be fetched by the chosen access
     method per each row combination of previous tables. That is:
@@ -541,6 +556,16 @@ struct POSITION {
     @param rowcount Estimated row count
   */
   void set_prefix_cost(double cost, double rowcount) {
+    //debug_print5("set_prefix_cost\n");
+
+    FILE *fp = fopen("/Users/pari/debug.txt", "ab");
+    if (fp != NULL)
+    {
+      fputs("set prefix cost\n", fp);
+      fflush(fp);
+      fclose(fp);
+    }
+
     prefix_cost = cost;
     prefix_rowcount = rowcount;
   }
@@ -555,15 +580,59 @@ struct POSITION {
     @param cm       Cost model that provides the actual calculation
   */
   void set_prefix_join_cost(uint idx, const Cost_model_server *cm) {
+    //debug_print5("set_prefix_join_cost!\n");
+    //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
+    //if (fp != NULL)
+    //{
+      //fputs("set prefix join cost\n", fp);
+      //fflush(fp);
+      //fclose(fp);
+    //}
+
     if (idx == 0) {
       prefix_rowcount = rows_fetched;
+      //prefix_rowcount = 42100.0;
       prefix_cost = read_cost + cm->row_evaluate_cost(prefix_rowcount);
     } else {
       prefix_rowcount = (this - 1)->prefix_rowcount * rows_fetched;
+      //debug_print5("using pre-set rowcounts!\n");
+      //prefix_rowcount = 42000.0;
       prefix_cost = (this - 1)->prefix_cost + read_cost +
                     cm->row_evaluate_cost(prefix_rowcount);
     }
     prefix_rowcount *= filter_effect;
+  }
+
+  void set_prefix_join_cost_injected(uint idx, const Cost_model_server *cm,
+      double prefix_card) {
+    //debug_print5("set_prefix_join_cost!\n");
+
+    //if (idx == 0) {
+      ////prefix_rowcount = rows_fetched;
+      //prefix_rowcount = 42100.0;
+      //prefix_cost = read_cost + cm->row_evaluate_cost(prefix_rowcount);
+    //} else {
+      ////prefix_rowcount = (this - 1)->prefix_rowcount * rows_fetched;
+      //prefix_rowcount = 42000.0;
+      //prefix_cost = (this - 1)->prefix_cost + read_cost +
+                    //cm->row_evaluate_cost(prefix_rowcount);
+    //}
+    //debug_print5("no filter effect!\n");
+    /// pari: !!!no filter effect!!!
+    //prefix_rowcount *= filter_effect;
+
+    if (idx == 0) {
+      prefix_rowcount = rows_fetched;
+      prefix_cost = read_cost + cm->row_evaluate_cost(prefix_rowcount);
+    } else {
+      // pari: not sure about this; why is it being multiplied here in the
+      // usual case? is it modelling the maximum amount of work / or nested loop
+      // join?
+      //prefix_rowcount = prefix_card * cur_table_card;
+      prefix_rowcount = prefix_card * rows_fetched;
+      prefix_cost = (this - 1)->prefix_cost + read_cost +
+                    cm->row_evaluate_cost(prefix_rowcount);
+    }
   }
 };
 
