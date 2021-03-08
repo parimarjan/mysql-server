@@ -87,16 +87,17 @@
 
 #define CROSS_JOIN_CONSTANT 150001000000.0
 
-//void debug_print4(char *msg)
-//{
+void debug_print4(const char *msg)
+{
   //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
-  //if (fp != NULL)
-  //{
-    //fputs(msg, fp);
-    ////fflush(fp);
-    //fclose(fp);
-  //}
-//}
+  FILE *fp = fopen("/home/ubuntu/debug.txt", "ab");
+  if (fp != NULL)
+  {
+    fputs(msg, fp);
+    fflush(fp);
+    fclose(fp);
+  }
+}
 
 using std::max;
 using std::min;
@@ -262,6 +263,7 @@ Optimize_table_order::Optimize_table_order(THD *thd_arg, JOIN *join_arg,
           {
             // let us loop over the json, and add everything to the hashmap
             update_cardinalities(file_str, injected_cards);
+            free(file_str);
             //debug_print4("initialized injected cards\n");
           } else {
             use_injected_cards = false;
@@ -2462,19 +2464,19 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
   /* Number of tables remaining to be optimized */
   uint size_remain = n_tables;
 
-  //char test[50];
-  //sprintf(test, "const tables at start: %d\n", join->const_tables);
-  //debug_print4(test);
-  //sprintf(test, "size remain at start: %d\n", size_remain);
-  //debug_print4(test);
+  std::fstream debug_file;
+  debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
+  debug_file << "greedy search started!\n";
 
   do {
     /* Find the extension of the current QEP with the lowest cost */
     join->best_read = DBL_MAX;
     join->best_rowcount = HA_POS_ERROR;
     found_plan_with_allowed_sj = false;
-    if (best_extension_by_limited_search(remaining_tables, idx, search_depth))
+    if (best_extension_by_limited_search(remaining_tables, idx, search_depth)) {
+      debug_file.close();
       return true;
+    }
     /*
       'best_read < DBL_MAX' means that optimizer managed to find
       some plan and updated 'best_positions' array accordingly.
@@ -2493,6 +2495,7 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
                      idx ? join->best_positions[idx - 1].prefix_cost : 0.0,
                      idx ? join->best_positions[idx - 1].prefix_cost : 0.0,
                      "optimal"););
+      debug_file.close();
       return false;
     }
 
@@ -2745,8 +2748,11 @@ char * join_strs(int num, const char **words)
 //bool str_compare (std::string a, std::string b) {return a<b;}
 static int str_compare(const void* a, const void* b)
 {
-    //return strcmp(*(const char**)a, *(const char**)b);
-    return strcmp((const char*)a, (const char*)b);
+	auto a_recast = static_cast<const char* const *>(a);
+  auto b_recast = static_cast<const char* const *>(b);
+  return std::strcmp(*a_recast, *b_recast);
+	// C-style gives warning
+  //return strcmp(*(const char**)a, *(const char**)b);
 }
 
 
@@ -2880,9 +2886,17 @@ bool Optimize_table_order::best_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
   //debug_print4("best_extension_by_limited_search\n");
+  //std::fstream debug_file;
+  //debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
+  //debug_file << "best extension started again!\n";
+  //debug_file << "search depth: " << current_search_depth << std::endl;
+  //debug_file << "idx:" << idx << std::endl;
+  //debug_file.flush();
+
   DBUG_EXECUTE_IF("bug13820776_2", thd->killed = THD::KILL_QUERY;);
   if (thd->killed)  // Abort
     return true;
+  //debug_file << "not aborted immediately\n" << std::endl;
 
   const Cost_model_server *const cost_model = join->cost_model();
   Opt_trace_context *const trace = &thd->opt_trace;
@@ -2904,9 +2918,6 @@ bool Optimize_table_order::best_extension_by_limited_search(
   //FILE *DBUG_FILE2 = fopen("/Users/pari/debug.txt", "ab");
   //fputs("*******best_extension_by_limited_search********: ", DBUG_FILE2);
 
-  std::fstream debug_file;
-  debug_file.open("/Users/pari/debug.txt", std::fstream::app);
-
   /*
     'eq_ref_extended' are the 'remaining_tables' which has already been
     involved in an partial query plan extension if this QEP. These
@@ -2921,8 +2932,6 @@ bool Optimize_table_order::best_extension_by_limited_search(
          sizeof(JOIN_TAB *) * (join->tables - idx));
 
   Deps_of_remaining_lateral_derived_tables deps_lateral(join, ~excluded_tables);
-
-  //char test[50];
 
   // pari: what is !use_best_so_far??
   for (JOIN_TAB **pos = join->best_ref + idx; *pos && !use_best_so_far; pos++) {
@@ -2968,7 +2977,7 @@ bool Optimize_table_order::best_extension_by_limited_search(
 				const char *tables[20];
 				int num_tables = 0;
 				char *joined;
-				//debug_file << "hello from new get_injected_cards!" << std::endl;
+        //debug_file << "hello from new get_injected_cards!" << std::endl;
         POSITION *dpos;
         TABLE *dtable;
         for (uint ai = 0; ai < idx; ai++) {
@@ -2990,14 +2999,12 @@ bool Optimize_table_order::best_extension_by_limited_search(
         if (dtable) {
           //tables[num_tables] = (char *) dtable->alias;
           tables[num_tables] = dtable->alias;
-          std::string alias_name(dtable->alias);
-          //debug_file << "current alias: " << alias_name << std::endl;
+          num_tables += 1;
+          //std::string alias_name(dtable->alias);
           //if (injected_cards.find(alias_name) != injected_cards.end()) {
-              ////debug_file << "found key: " << alias_name << std::endl;
               //cur_table_card = injected_cards[alias_name];
           //} else {
-              ////debug_file << "!!!!!!!ERRRROR!!!!!!!, could not find: " << alias_name << std::endl;
-              //cur_card = CROSS_JOIN_CONSTANT;
+              //cur_table_card = CROSS_JOIN_CONSTANT;
           //}
         }
 
@@ -3005,7 +3012,9 @@ bool Optimize_table_order::best_extension_by_limited_search(
 				joined = join_strs(num_tables, tables);
 
         std::string cur_key(joined);
+        free(joined);
         //debug_file << "cur key is: " << cur_key << std::endl;
+        //debug_file.flush();
 
         //cur_card = CROSS_JOIN_CONSTANT;
         if (injected_cards.find(cur_key) != injected_cards.end()) {
@@ -3017,7 +3026,6 @@ bool Optimize_table_order::best_extension_by_limited_search(
             cur_card = CROSS_JOIN_CONSTANT;
             position->has_cross_join = true;
         }
-        prefix_card = (position - 1)->prefix_rowcount;
 
         //if (injected_cards.find(prefix_key) != injected_cards.end()) {
             //debug_file << "found prefix key: " << prefix_key << std::endl;
@@ -3035,8 +3043,14 @@ bool Optimize_table_order::best_extension_by_limited_search(
         //position->set_prefix_join_cost_injected(idx, cost_model, prefix_card,
             //cur_table_card);
 
-        best_access_path(s, remaining_tables, idx, false,
-                         idx ? prefix_card : 1.0, position);
+        //prefix_card = (position - 1)->prefix_rowcount;
+        if (idx != 0) {
+          prefix_card = (position - 1)->prefix_rowcount;
+        } else {
+          prefix_card = 1.0;
+        }
+
+        best_access_path(s, remaining_tables, idx, false, prefix_card, position);
         position->set_prefix_join_cost_injected(idx, cost_model, prefix_card);
         position->prefix_rowcount = cur_card;
 
@@ -3050,6 +3064,7 @@ bool Optimize_table_order::best_extension_by_limited_search(
       }
 
       // pari: TODO: remove.
+      //char test[1000];
       //sprintf(test, "after set_prefix_join_cost, count: %f\n",
           //position->prefix_rowcount);
       //debug_print4(test);
@@ -3178,6 +3193,8 @@ bool Optimize_table_order::best_extension_by_limited_search(
 
         /* Fallthrough: Explore more best extensions of plan */
         Opt_trace_array trace_rest(trace, "rest_of_plan");
+        //debug_file << "going to recurse into best_extension\n";
+        //debug_file.close();
         if (best_extension_by_limited_search(remaining_tables_after, idx + 1,
                                              current_search_depth - 1))
           return true;
@@ -3201,7 +3218,8 @@ done:
   // Restore previous #rows sorted best_ref[]
   memcpy(join->best_ref + idx, saved_refs,
          sizeof(JOIN_TAB *) * (join->tables - idx));
-  debug_file.close();
+  //debug_print4("going to call debug_file.close()\n");
+  //debug_file.close();
   return false;
 }
 
@@ -3342,7 +3360,7 @@ table_map Optimize_table_order::eq_ref_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
 
-  //debug_print4("EQ REF EXTENSION!!!SHOULD NOT HAVE HAPPENED\n");
+  debug_print4("EQ REF EXTENSION!!!SHOULD NOT HAVE HAPPENED\n");
   if (remaining_tables == 0) return 0;
 
   /*
