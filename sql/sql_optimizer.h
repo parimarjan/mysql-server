@@ -59,6 +59,7 @@
 #include "sql/sql_select.h"  // Key_use
 #include "sql/table.h"
 #include "sql/temp_table_param.h"
+#include <map>
 
 enum class Subquery_strategy : int;
 class COND_EQUAL;
@@ -129,6 +130,9 @@ class JOIN {
   JOIN &operator=(const JOIN &rhs) = delete;
 
   ~JOIN() {}
+
+  // pari: tracking rows_fetched
+  std::map<std::string, std::map<std::string, double>> rows_fetched;
 
   /// Query block that is optimized and executed using this JOIN
   SELECT_LEX *const select_lex;

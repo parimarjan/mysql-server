@@ -84,6 +84,7 @@
 //#include <iostream>
 #include <fstream>
 #include <math.h>
+#include "json.hpp"
 
 #define CROSS_JOIN_CONSTANT 150001000000.0
 
@@ -2496,6 +2497,27 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
                      idx ? join->best_positions[idx - 1].prefix_cost : 0.0,
                      "optimal"););
       debug_file.close();
+      // let's save fetched_rows
+      std::fstream json_file;
+      json_file.open("/tmp/fetched_rows.json", std::fstream::app);
+      using json = nlohmann::json;
+      for (auto it = join->rows_fetched.begin(); it != join->rows_fetched.end(); it++)
+      {
+        json j;
+        json j_map(it->second);
+        j[it->first] = j_map;
+        std::string s = j.dump();
+        json_file << s << std::endl;
+          //std::cout << it->first    // string (key)
+                    //<< ':'
+                    //<< it->second   // string's value
+                    //<< std::endl;
+      }
+
+      //json j_map(join->rows_fetched);
+      //std::string s = j_map.dump();
+      //json_file << s;
+
       return false;
     }
 
@@ -2885,9 +2907,9 @@ static int str_compare(const void* a, const void* b)
 bool Optimize_table_order::best_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
-  //debug_print4("best_extension_by_limited_search\n");
-  //std::fstream debug_file;
-  //debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
+  debug_print4("best_extension_by_limited_search\n");
+  std::fstream debug_file;
+  debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
   //debug_file << "best extension started again!\n";
   //debug_file << "search depth: " << current_search_depth << std::endl;
   //debug_file << "idx:" << idx << std::endl;
@@ -2996,25 +3018,22 @@ bool Optimize_table_order::best_extension_by_limited_search(
 
         // TODO: for current table
         dtable = s->table();
-        if (dtable) {
-          //tables[num_tables] = (char *) dtable->alias;
-          tables[num_tables] = dtable->alias;
-          num_tables += 1;
-          //std::string alias_name(dtable->alias);
-          //if (injected_cards.find(alias_name) != injected_cards.end()) {
-              //cur_table_card = injected_cards[alias_name];
-          //} else {
-              //cur_table_card = CROSS_JOIN_CONSTANT;
-          //}
-        }
+        tables[num_tables] = dtable->alias;
+        num_tables += 1;
+        std::string alias_name(dtable->alias);
+        debug_file << "cur table is: " << alias_name;
+        //if (injected_cards.find(alias_name) != injected_cards.end()) {
+            //cur_table_card = injected_cards[alias_name];
+        //} else {
+            //cur_table_card = CROSS_JOIN_CONSTANT;
+        //}
 
 				qsort(tables, num_tables, sizeof(const char*), str_compare);
 				joined = join_strs(num_tables, tables);
 
         std::string cur_key(joined);
         free(joined);
-        //debug_file << "cur key is: " << cur_key << std::endl;
-        //debug_file.flush();
+        debug_file << "cur key is: " << cur_key << std::endl;
 
         //cur_card = CROSS_JOIN_CONSTANT;
         if (injected_cards.find(cur_key) != injected_cards.end()) {
@@ -3054,6 +3073,8 @@ bool Optimize_table_order::best_extension_by_limited_search(
         position->set_prefix_join_cost_injected(idx, cost_model, prefix_card);
         position->prefix_rowcount = cur_card;
 
+        join->rows_fetched[cur_key][alias_name] = position->rows_fetched;
+
       } else {
         //debug_print4("No injected cards: usual C.E for QO\n");
         // usual case
@@ -3064,10 +3085,13 @@ bool Optimize_table_order::best_extension_by_limited_search(
       }
 
       // pari: TODO: remove.
-      //char test[1000];
-      //sprintf(test, "after set_prefix_join_cost, count: %f\n",
-          //position->prefix_rowcount);
-      //debug_print4(test);
+      char test[1000];
+      sprintf(test, "after set_prefix_join_cost, prefix_rowcount: %f\n",
+          position->prefix_rowcount);
+      debug_print4(test);
+      sprintf(test, "after set_prefix_join_cost, rows_fetched: %f\n",
+          position->rows_fetched);
+      debug_print4(test);
 
       trace_one_table
           .add("condition_filtering_pct", position->filter_effect * 100)
@@ -3219,7 +3243,7 @@ done:
   memcpy(join->best_ref + idx, saved_refs,
          sizeof(JOIN_TAB *) * (join->tables - idx));
   //debug_print4("going to call debug_file.close()\n");
-  //debug_file.close();
+  debug_file.close();
   return false;
 }
 
