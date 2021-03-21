@@ -1114,6 +1114,7 @@ void Optimize_table_order::best_access_path(JOIN_TAB *tab,
                                             const uint idx, bool disable_jbuf,
                                             const double prefix_rowcount,
                                             POSITION *pos) {
+  //debug_print4("in get_access_path\n");
   bool found_condition = false;
   bool best_uses_jbuf = false;
   Opt_trace_context *const trace = &thd->opt_trace;
@@ -2467,7 +2468,7 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
 
   std::fstream debug_file;
   debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
-  debug_file << "greedy search started!\n";
+  //debug_file << "greedy search started!\n";
 
   do {
     /* Find the extension of the current QEP with the lowest cost */
@@ -2499,7 +2500,9 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
       debug_file.close();
       // let's save fetched_rows
       std::fstream json_file;
+      std::fstream json_file2;
       json_file.open("/tmp/fetched_rows.json", std::fstream::app);
+      json_file2.open("/tmp/read_costs.json", std::fstream::app);
       using json = nlohmann::json;
       for (auto it = join->rows_fetched.begin(); it != join->rows_fetched.end(); it++)
       {
@@ -2508,15 +2511,15 @@ bool Optimize_table_order::greedy_search(table_map remaining_tables) {
         j[it->first] = j_map;
         std::string s = j.dump();
         json_file << s << std::endl;
-          //std::cout << it->first    // string (key)
-                    //<< ':'
-                    //<< it->second   // string's value
-                    //<< std::endl;
       }
-
-      //json j_map(join->rows_fetched);
-      //std::string s = j_map.dump();
-      //json_file << s;
+      for (auto it = join->read_cost.begin(); it != join->read_cost.end(); it++)
+      {
+        json j;
+        json j_map(it->second);
+        j[it->first] = j_map;
+        std::string s = j.dump();
+        json_file2 << s << std::endl;
+      }
 
       return false;
     }
@@ -2907,7 +2910,7 @@ static int str_compare(const void* a, const void* b)
 bool Optimize_table_order::best_extension_by_limited_search(
     table_map remaining_tables, uint idx, uint current_search_depth) {
   DBUG_TRACE;
-  debug_print4("best_extension_by_limited_search\n");
+  //debug_print4("best_extension_by_limited_search\n");
   std::fstream debug_file;
   debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
   //debug_file << "best extension started again!\n";
@@ -3021,7 +3024,7 @@ bool Optimize_table_order::best_extension_by_limited_search(
         tables[num_tables] = dtable->alias;
         num_tables += 1;
         std::string alias_name(dtable->alias);
-        debug_file << "cur table is: " << alias_name;
+        //debug_file << "cur table is: " << alias_name;
         //if (injected_cards.find(alias_name) != injected_cards.end()) {
             //cur_table_card = injected_cards[alias_name];
         //} else {
@@ -3033,7 +3036,6 @@ bool Optimize_table_order::best_extension_by_limited_search(
 
         std::string cur_key(joined);
         free(joined);
-        debug_file << "cur key is: " << cur_key << std::endl;
 
         //cur_card = CROSS_JOIN_CONSTANT;
         if (injected_cards.find(cur_key) != injected_cards.end()) {
@@ -3069,11 +3071,18 @@ bool Optimize_table_order::best_extension_by_limited_search(
           prefix_card = 1.0;
         }
 
+        //debug_file << "cur key is: " << cur_key << std::endl;
+        //debug_file << "cur card is: " << cur_card << std::endl;
+        //debug_file << "prefix card is: " << prefix_card << std::endl;
+
         best_access_path(s, remaining_tables, idx, false, prefix_card, position);
         position->set_prefix_join_cost_injected(idx, cost_model, prefix_card);
         position->prefix_rowcount = cur_card;
 
         join->rows_fetched[cur_key][alias_name] = position->rows_fetched;
+        join->read_cost[cur_key][alias_name] = position->read_cost;
+        //debug_file << "key: " << cur_key << " cur alias: " << alias_name << std::endl;
+        //debug_file << "read cost: " << position->read_cost << std::endl;
 
       } else {
         //debug_print4("No injected cards: usual C.E for QO\n");
@@ -3085,13 +3094,13 @@ bool Optimize_table_order::best_extension_by_limited_search(
       }
 
       // pari: TODO: remove.
-      char test[1000];
-      sprintf(test, "after set_prefix_join_cost, prefix_rowcount: %f\n",
-          position->prefix_rowcount);
-      debug_print4(test);
-      sprintf(test, "after set_prefix_join_cost, rows_fetched: %f\n",
-          position->rows_fetched);
-      debug_print4(test);
+      //char test[1000];
+      //sprintf(test, "after set_prefix_join_cost, prefix_rowcount: %f\n",
+          //position->prefix_rowcount);
+      //debug_print4(test);
+      //sprintf(test, "after set_prefix_join_cost, rows_fetched: %f\n",
+          //position->rows_fetched);
+      //debug_print4(test);
 
       trace_one_table
           .add("condition_filtering_pct", position->filter_effect * 100)

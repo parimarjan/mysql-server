@@ -44,6 +44,8 @@
 #include "sql/sql_const.h"
 #include "sql/sql_opt_exec_shared.h"  // join_type
 
+#include <fstream>
+
 class Item;
 class Item_func;
 class JOIN_TAB;
@@ -65,17 +67,6 @@ struct TABLE;
 struct TABLE_LIST;
 
 typedef ulonglong nested_join_map;
-
-//void debug_print5(char *msg)
-//{
-  //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
-  //if (fp != NULL)
-  //{
-    //fputs(msg, fp);
-    //fflush(fp);
-    //fclose(fp);
-  //}
-//}
 
 class Sql_cmd_select : public Sql_cmd_dml {
  public:
@@ -556,7 +547,6 @@ struct POSITION {
     @param rowcount Estimated row count
   */
   void set_prefix_cost(double cost, double rowcount) {
-    //debug_print5("set_prefix_cost\n");
 
     FILE *fp = fopen("/Users/pari/debug.txt", "ab");
     if (fp != NULL)
@@ -580,14 +570,6 @@ struct POSITION {
     @param cm       Cost model that provides the actual calculation
   */
   void set_prefix_join_cost(uint idx, const Cost_model_server *cm) {
-    //debug_print5("set_prefix_join_cost!\n");
-    //FILE *fp = fopen("/Users/pari/debug.txt", "ab");
-    //if (fp != NULL)
-    //{
-      //fputs("set prefix join cost\n", fp);
-      //fflush(fp);
-      //fclose(fp);
-    //}
 
     if (idx == 0) {
       prefix_rowcount = rows_fetched;
@@ -595,7 +577,6 @@ struct POSITION {
       prefix_cost = read_cost + cm->row_evaluate_cost(prefix_rowcount);
     } else {
       prefix_rowcount = (this - 1)->prefix_rowcount * rows_fetched;
-      //debug_print5("using pre-set rowcounts!\n");
       //prefix_rowcount = 42000.0;
       prefix_cost = (this - 1)->prefix_cost + read_cost +
                     cm->row_evaluate_cost(prefix_rowcount);
@@ -605,21 +586,10 @@ struct POSITION {
 
   void set_prefix_join_cost_injected(uint idx, const Cost_model_server *cm,
       double prefix_card) {
-    //debug_print5("set_prefix_join_cost!\n");
 
-    //if (idx == 0) {
-      ////prefix_rowcount = rows_fetched;
-      //prefix_rowcount = 42100.0;
-      //prefix_cost = read_cost + cm->row_evaluate_cost(prefix_rowcount);
-    //} else {
-      ////prefix_rowcount = (this - 1)->prefix_rowcount * rows_fetched;
-      //prefix_rowcount = 42000.0;
-      //prefix_cost = (this - 1)->prefix_cost + read_cost +
-                    //cm->row_evaluate_cost(prefix_rowcount);
-    //}
-    //debug_print5("no filter effect!\n");
-    /// pari: !!!no filter effect!!!
-    //prefix_rowcount *= filter_effect;
+    //std::fstream debug_file;
+    //debug_file.open("/home/ubuntu/debug.txt", std::fstream::app);
+    //char test[200];
 
     if (idx == 0) {
       prefix_rowcount = rows_fetched;
@@ -628,11 +598,17 @@ struct POSITION {
       // pari: not sure about this; why is it being multiplied here in the
       // usual case? is it modelling the maximum amount of work / or nested loop
       // join?
-      //prefix_rowcount = prefix_card * cur_table_card;
+      // prefix_rowcount = prefix_card * cur_table_card;
       prefix_rowcount = prefix_card * rows_fetched;
       prefix_cost = (this - 1)->prefix_cost + read_cost +
                     cm->row_evaluate_cost(prefix_rowcount);
+      //double eval_cost = cm->row_evaluate_cost(prefix_rowcount);
+      //sprintf(test, "read cost: %f, prefix_card: %f, rows_fetched: %f, prefix rowcount: %f, eval_cost: %f, prefix_cost: %f\n",
+          //read_cost, prefix_card, rows_fetched, prefix_rowcount, eval_cost, prefix_cost);
+      //std::string c(test);
+      //debug_file << c;
     }
+    //debug_file.close();
   }
 };
 

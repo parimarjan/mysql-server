@@ -133,6 +133,7 @@ class JOIN {
 
   // pari: tracking rows_fetched
   std::map<std::string, std::map<std::string, double>> rows_fetched;
+  std::map<std::string, std::map<std::string, double>> read_cost;
 
   /// Query block that is optimized and executed using this JOIN
   SELECT_LEX *const select_lex;
